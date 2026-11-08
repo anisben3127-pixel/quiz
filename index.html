@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QuizLive – Questions &amp; jeux en direct</title>
+<style>
+:root{--p:#6d5dfc;--p2:#ff6bb5;--ink:#22204a;--ok:#1fb67a;--ko:#f0506e}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;min-height:100vh;font-family:system-ui,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:linear-gradient(135deg,#6d5dfc,#ff6bb5 60%,#ffb86b) fixed}
+.w{max-width:680px;margin:0 auto}
+h1{color:#fff;text-align:center;margin:8px 0 2px;font-size:2.1rem;text-shadow:0 3px 10px #0003}
+.sub{color:#fff;text-align:center;opacity:.92;margin:0 0 14px}
+.c{background:#fff;border-radius:20px;padding:20px;margin:14px 0;box-shadow:0 10px 30px #0002;animation:pop .35s ease}
+@keyframes pop{from{transform:translateY(12px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+h3{margin:0 0 8px}
+button{font:inherit;border:0;border-radius:12px;padding:12px 18px;background:var(--p);color:#fff;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}
+button:active{transform:scale(.97)}
+button.s{background:#ece9ff;color:var(--p)}button.g{background:var(--ok)}button.r{background:var(--ko)}
+input,textarea,select{font:inherit;width:100%;padding:12px;border:2px solid #e0dcff;border-radius:12px;margin:6px 0;background:#fff;color:var(--ink)}
+.opt{display:block;width:100%;text-align:left;background:#f4f2ff;color:var(--ink);border:2px solid transparent}
+.opt.sel{border-color:var(--p);background:#e8e4ff}
+.bar{height:30px;border-radius:9px;background:#ece9ff;margin:6px 0;position:relative;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,var(--p),var(--p2));opacity:.55}
+.bar b{position:relative;padding:0 10px;line-height:30px;font-size:.92rem}
+.big{font-size:1.35rem;font-weight:800;margin:8px 0}
+.mix{letter-spacing:.25em;font-size:2rem;font-weight:900;color:var(--p);text-align:center;word-break:break-word}
+.tag{display:inline-block;background:#ece9ff;color:var(--p);border-radius:99px;padding:3px 12px;font-size:.8rem;font-weight:700}
+.pill{display:inline-block;background:#f4f2ff;border-radius:99px;padding:5px 12px;margin:3px;font-size:.9rem}
+.res{padding:12px;border-radius:12px;font-weight:700;margin:8px 0}
+.res.ok{background:#d6f5e8;color:#0b7a50}.res.ko{background:#fde0e6;color:#b3223f}.res.nt{background:#fff3d6;color:#8a5a00}
+small{color:#6b688f}
+#st{text-align:center;color:#fff;font-size:.8rem;opacity:.85}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>🎉 QuizLive</h1>
+  <p class="sub">Questions, devinettes &amp; jeux de mots en direct</p>
+  <div id="app"></div>
+  <p id="st"></p>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const nz=s=>String(s??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const P=new URLSearchParams(location.search);
+let DB=P.get("db")||"", ROOM=P.get("r")||"", ANIM=P.get("m")==="anim";
+const SID=localStorage.getItem("ql_sid")||(()=>{const s=Math.random().toString(36).slice(2,9);localStorage.setItem("ql_sid",s);return s})();
+let NAME=localStorage.getItem("ql_name")||"", room={qs:{},a:{}}, last="", sel=null;
+const LAB={text:"Réponse libre",qcm:"QCM",mix:"Mot mélangé"};
+
+/* ---------- Stockage : Firebase (REST) ou local (test) ---------- */
+const base=()=>DB.replace(/\/$/,"")+"/rooms/"+ROOM;
+const seg=p=>p.split("/").filter(Boolean);
+const lget=(o,p)=>{for(const k of seg(p)){if(o==null)return null;o=o[k]}return o??null};
+function lset(o,p,v){o=o||{};let c=o;const s=seg(p);s.forEach((k,i)=>{if(i===s.length-1)c[k]=v;else c=c[k]=c[k]||{}});return o}
+const lk=()=>"ql_room_"+ROOM;
+async function get(p=""){
+  if(DB){const r=await fetch(base()+p+".json");return r.json()}
+  return lget(JSON.parse(localStorage.getItem(lk())||"null"),p);
+}
+async function put(p,v){
+  if(DB){await fetch(base()+p+".json",{method:"PUT",body:JSON.stringify(v)})}
+  else localStorage.setItem(lk(),JSON.stringify(lset(JSON.parse(localStorage.getItem(lk())||"null"),p,v)));
+}
+
+/* ---------- Accueil ---------- */
+function home(){
+  $("#app").innerHTML=`<div class="c"><h3>🎤 Je suis l’animateur</h3>
+  <p><small>Colle l’adresse de ta base Firebase gratuite (voir le guide). Laisse vide pour un simple test sur cet appareil.</small></p>
+  <input id="fb" placeholder="https://mon-projet-default-rtdb.firebaseio.com" value="${esc(localStorage.getItem("ql_db")||"")}">
+  <button onclick="mk()">✨ Créer une salle</button></div>
+  <div class="c"><h3>🎓 Je suis étudiant</h3><p>Ouvre simplement le lien envoyé par ton animateur.</p></div>`;
+}
+async function mk(){
+  DB=$("#fb").value.trim();localStorage.setItem("ql_db",DB);
+  ROOM=Math.random().toString(36).slice(2,6).toUpperCase();ANIM=true;
+  try{await put("/meta",{t:Date.now()})}catch(e){return alert("Impossible de joindre la base. Vérifie l’adresse.")}
+  const q=new URLSearchParams({r:ROOM});if(DB)q.set("db",DB);q.set("m","anim");
+  history.replaceState(null,"","?"+q);start();
+}
+const link=()=>{const q=new URLSearchParams({r:ROOM});if(DB)q.set("db",DB);return location.href.split("?")[0].split("#")[0]+"?"+q};
+const cp=()=>navigator.clipboard.writeText(link()).then(()=>alert("Lien copié ✅"));
+
+/* ---------- Démarrage ---------- */
+function start(){
+  if(ANIM)teacher();
+  else if(!NAME)nameForm();
+  else{$("#app").innerHTML='<div class="c" id="live"></div>'}
+  refresh();setInterval(refresh,2000);
+}
+function nameForm(){
+  $("#app").innerHTML=`<div class="c"><h3>👋 Bienvenue !</h3><p>Comment t’appelles-tu ?</p><input id="nm" placeholder="Ton prénom" maxlength="30"><button onclick="setName()">Entrer</button></div>`;
+}
+function setName(){
+  const v=$("#nm").value.trim();if(!v)return;NAME=v;localStorage.setItem("ql_name",v);
+  $("#app").innerHTML='<div class="c" id="live"></div>';last="";refresh();
+}
+async function refresh(){
+  if(!ROOM||(!ANIM&&!NAME))return;
+  try{
+    const r=await get("");
+    if(!r||!r.meta){$("#st").textContent="Salle introuvable…";return}
+    $("#st").textContent="Salle "+ROOM+" · connecté 🟢";
+    room={qs:{},a:{},...r};
+    const cur=(room.a||{})[room.cur]||{};
+    const sg=ANIM?JSON.stringify(room):JSON.stringify([room.cur,room.ended,(room.qs[room.cur]||{}).state,Object.keys(cur).length,!!cur[SID]]);
+    if(sg!==last){last=sg;ANIM?live(room):stud(room)}
+  }catch(e){$("#st").textContent="Connexion impossible 🔴"}
+}
+
+/* ---------- Outils ---------- */
+const ok=(q,v)=>!!q&&q.answer!==undefined&&(q.type==="qcm"?+v===+q.answer:String(q.answer).split("|").some(x=>nz(x)===nz(v)));
+function results(q,A,showAll){
+  const rv=q.state!=="open";let h="";
+  if(q.type==="qcm"){
+    q.choices.forEach((c,i)=>{
+      const k=A.filter(a=>+a.v===i).length,p=A.length?k/A.length*100:0,good=rv&&i===+q.answer;
+      h+=`<div class="bar"><i style="width:${p}%;${good?"background:var(--ok);opacity:.8":""}"></i><b>${good?"✅ ":""}${esc(c)} — ${k}</b></div>`;
+    });
+  }else if(showAll){
+    h+=A.map(a=>`<span class="pill">${esc(a.n)} : <b>${esc(a.v)}</b></span>`).join("");
+  }
+  if(rv&&q.type!=="qcm"&&q.answer!==undefined)h+=`<p class="big">✅ ${esc(String(q.answer).split("|")[0])}</p>`;
+  if(rv&&q.msg)h+=`<div class="res nt">💬 ${esc(q.msg)}</div>`;
+  return h;
+}
+function board(r){
+  const S={};
+  Object.entries(r.a||{}).forEach(([id,m])=>Object.entries(m).forEach(([s,a])=>{
+    S[s]=S[s]||{n:a.n,k:0,me:s===SID};if(ok(r.qs[id],a.v))S[s].k++;
+  }));
+  const L=Object.values(S).sort((a,b)=>b.k-a.k);
+  return L.length?"<ol>"+L.map((x,i)=>`<li>${i==0?"🥇 ":""}${esc(x.n)} — <b>${x.k}</b> pt${x.k>1?"s":""}</li>`).join("")+"</ol>":"";
+}
+const shuf=t=>{let a=t.toUpperCase().replace(/\s+/g," ").split(""),b;for(let i=0;i<9;i++){b=[...a].sort(()=>Math.random()-.5);if(b.join("")!==a.join(""))break}return b.map(c=>c===" "?"/":c).join(" ")};
+const qtext=q=>q.type==="mix"?`<p>Remets les lettres dans l’ordre :</p><div class="mix">${esc(q.mix)}</div>`:`<p class="big">${esc(q.text)}</p>`;
+
+/* ---------- Animateur ---------- */
+function teacher(){
+  $("#app").innerHTML=`<div class="c"><span class="tag">Salle ${ROOM}</span>
+  <p><b>Lien à envoyer aux étudiants :</b></p><input readonly value="${esc(link())}" onclick="this.select()">
+  <button class="s" onclick="cp()">📋 Copier le lien</button>
+  ${DB?"":"<br><small>Mode test : fonctionne seulement entre onglets du même navigateur.</small>"}</div>
+  <div class="c" id="live"></div>
+  <div class="c"><h3>➕ Nouvelle question</h3>
+  <select id="t" onchange="tg()"><option value="text">💬 Réponse libre / devinette</option><option value="qcm">🔘 QCM</option><option value="mix">🔤 Mot mélangé (jeu de mots)</option></select>
+  <textarea id="qt" rows="2" placeholder="Ta question…"></textarea>
+  <textarea id="qc" rows="4" placeholder="Choix (un par ligne)" style="display:none"></textarea>
+  <input id="qa" placeholder="Réponse attendue (plusieurs possibles : séparées par |) — facultatif">
+  <button onclick="pub()">🚀 Publier</button></div>`;
+}
+function tg(){
+  const t=$("#t").value;
+  $("#qc").style.display=t==="qcm"?"block":"none";
+  $("#qa").style.display=t==="mix"?"none":"block";
+  $("#qt").placeholder=t==="mix"?"Le mot ou la phrase à mélanger…":"Ta question…";
+  $("#qa").placeholder=t==="qcm"?"Numéro de la bonne réponse (ex. 2)":"Réponse attendue (plusieurs possibles : séparées par |) — facultatif";
+}
+async function pub(){
+  const t=$("#t").value,txt=$("#qt").value.trim();if(!txt)return alert("Écris la question !");
+  const q={type:t,text:txt,state:"open"};const a=$("#qa").value.trim();
+  if(t==="qcm"){
+    const ch=$("#qc").value.split("\n").map(s=>s.trim()).filter(Boolean);
+    if(ch.length<2)return alert("Mets au moins 2 choix.");
+    q.choices=ch;q.answer=(parseInt(a)||1)-1;
+  }else if(t==="mix"){q.answer=txt;q.mix=shuf(txt)}
+  else if(a)q.answer=a;
+  const id="q"+(Object.keys(room.qs||{}).length+1);
+  await put("/qs/"+id,q);await put("/cur",id);
+  ["qt","qc","qa"].forEach(i=>$("#"+i).value="");last="";refresh();
+}
+async function rev(){
+  const m=prompt("Message avec la réponse (facultatif) :");
+  if(m)await put("/qs/"+room.cur+"/msg",m);
+  await put("/qs/"+room.cur+"/state","revealed");last="";refresh();
+}
+async function endp(){if(confirm("Terminer le sondage ?")){await put("/ended",true);last="";refresh()}}
+function live(r){
+  const id=r.cur,q=id&&r.qs[id];let h="";
+  if(r.ended){
+    h=`<h3>🏁 Sondage terminé</h3>${board(r)}<button class="s" onclick="location.href=location.href.split('?')[0]">🔄 Nouvelle salle</button>`;
+  }else if(!q){
+    h="<p>Aucune question pour l’instant. Publie la première ⬇️</p>";
+  }else{
+    const A=Object.values((r.a||{})[id]||{});
+    h=`<span class="tag">Q${id.slice(1)} · ${LAB[q.type]}</span>${qtext(q)}<p>👥 ${A.length} réponse(s)</p>${results(q,A,true)}`;
+    if(q.state==="open")h+=`<button class="g" onclick="rev()">👁️ Révéler la réponse</button>`;
+    h+=`<button class="r" onclick="endp()">🏁 Fin du sondage</button>`;
+  }
+  $("#live").innerHTML=h;
+}
+
+/* ---------- Étudiant ---------- */
+function pick(i){
+  sel=i;document.querySelectorAll(".opt").forEach((b,k)=>b.classList.toggle("sel",k===i));
+}
+async function send(){
+  const q=room.qs[room.cur];const v=q.type==="qcm"?sel:$("#ans").value.trim();
+  if(v===null||v==="")return;
+  await put("/a/"+room.cur+"/"+SID,{n:NAME,v});sel=null;last="";refresh();
+}
+function stud(r){
+  const id=r.cur,q=id&&r.qs[id];let h="";
+  if(r.ended){
+    let pts=0,tot=0;
+    Object.entries(r.qs).forEach(([k,x])=>{if(x.answer!==undefined){tot++;const m=(r.a||{})[k]||{};if(m[SID]&&ok(x,m[SID].v))pts++}});
+    h=`<h3>🏁 Sondage terminé, merci ${esc(NAME)} !</h3>${tot?`<p class="big">Ton score : ${pts} / ${tot} 🎯</p>`:""}${board(r)}`;
+  }else if(!q){
+    h="<h3>⏳ En attente de la première question…</h3><p><small>Ne ferme pas cette page, tout se met à jour tout seul.</small></p>";
+  }else{
+    const mine=((r.a||{})[id]||{})[SID],A=Object.values((r.a||{})[id]||{});
+    h=`<span class="tag">Question ${id.slice(1)}</span>${qtext(q)}`;
+    if(q.state==="open"&&!mine){
+      if(q.type==="qcm")h+=q.choices.map((c,i)=>`<button class="opt" onclick="pick(${i})">${esc(c)}</button>`).join("");
+      else h+=`<input id="ans" placeholder="Ta réponse…" autocomplete="off">`;
+      h+=`<button onclick="send()">📨 Envoyer</button>`;
+    }else if(q.state==="open"){
+      h+=`<div class="res nt">✅ Réponse envoyée : <b>${esc(q.type==="qcm"?q.choices[mine.v]:mine.v)}</b><br>Attends la correction…</div>`;
+    }else{
+      if(mine&&q.answer!==undefined)h+=ok(q,mine.v)?`<div class="res ok">🎉 Bravo, bonne réponse !</div>`:`<div class="res ko">❌ Pas tout à fait…</div>`;
+      else if(!mine)h+=`<div class="res nt">Tu n’as pas répondu à cette question.</div>`;
+      h+=results(q,A,false);
+    }
+  }
+  $("#live").innerHTML=h;
+}
+
+if(ROOM)start();else home();
+</script>
+</body>
+</html>
