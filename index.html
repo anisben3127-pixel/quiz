@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QuizLive – Questionnaires en direct</title>
+<title>QuizLive – Sujets en direct</title>
 <style>
 :root{--p:#6d5dfc;--p2:#ff6bb5;--ink:#22204a;--ok:#1fb67a;--ko:#f0506e}
 *{box-sizing:border-box}
-body{margin:0;padding:16px;min-height:100vh;font-family:system-ui,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:linear-gradient(135deg,#6d5dfc,#ff6bb5 60%,#ffb86b) fixed}
+body{margin:0;padding:16px 16px 90px;min-height:100vh;font-family:system-ui,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:linear-gradient(135deg,#6d5dfc,#ff6bb5 60%,#ffb86b) fixed}
 .w{max-width:700px;margin:0 auto}
 h1{color:#fff;text-align:center;margin:8px 0 2px;font-size:2.1rem;text-shadow:0 3px 10px #0003}
 .sub{color:#fff;text-align:center;opacity:.92;margin:0 0 14px}
 .c{background:#fff;border-radius:20px;padding:20px;margin:14px 0;box-shadow:0 10px 30px #0002;animation:pop .35s ease}
+.c.ex{background:#ece9ff}
 @keyframes pop{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
 h3{margin:0 0 8px}
 button{font:inherit;border:0;border-radius:12px;padding:12px 18px;background:var(--p);color:#fff;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}
-button.s{background:#ece9ff;color:var(--p)}button.g{background:var(--ok)}button.r{background:var(--ko)}button.sm{padding:4px 10px}
+button.s{background:#ece9ff;color:var(--p)}button.g{background:var(--ok)}button.r{background:var(--ko)}button.sm{padding:3px 10px}
 input,textarea,select{font:inherit;width:100%;padding:12px;border:2px solid #e0dcff;border-radius:12px;margin:6px 0;background:#fff;color:var(--ink)}
 input[type=checkbox]{width:24px;height:24px;margin:0;flex:none;accent-color:var(--p)}
 .row,.chk{display:flex;gap:10px;align-items:center}
@@ -31,6 +32,12 @@ input[type=checkbox]{width:24px;height:24px;margin:0;flex:none;accent-color:var(
 .pill{display:inline-block;background:#f4f2ff;border-radius:12px;padding:5px 12px;margin:3px;font-size:.88rem}
 .res{padding:10px 12px;border-radius:12px;margin:6px 0;background:#f4f2ff}
 .res.ok{background:#d6f5e8;color:#0b7a50;font-weight:700}.res.ko{background:#fde0e6;color:#b3223f;font-weight:700}.res.nt{background:#fff3d6;color:#8a5a00}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #eee;text-align:left;font-size:.9rem}
+.fab{position:fixed;right:16px;bottom:16px;width:56px;height:56px;padding:0;border-radius:50%;font-size:1.5rem;box-shadow:0 6px 18px #0004;z-index:6}
+.cp{position:fixed;left:12px;right:12px;bottom:84px;max-width:420px;margin-left:auto;background:#fff;border-radius:18px;padding:14px;box-shadow:0 10px 30px #0004;z-index:6}
+#msgs{max-height:40vh;overflow:auto;margin:8px 0}
+.m{padding:8px 12px;border-radius:14px;margin:4px 0;max-width:85%;background:#f4f2ff}
+.m.s{margin-left:auto;background:var(--p);color:#fff}
 small{color:#6b688f}
 #st{text-align:center;color:#fff;font-size:.8rem;opacity:.85}
 </style>
@@ -38,7 +45,7 @@ small{color:#6b688f}
 <body>
 <div class="w">
   <h1>🎉 QuizLive</h1>
-  <p class="sub">Questionnaires, QCM &amp; jeux de mots en direct</p>
+  <p class="sub">Sujets, QCM &amp; jeux de mots en direct</p>
   <div id="app"></div>
   <p id="st"></p>
 </div>
@@ -51,7 +58,7 @@ const nums=x=>arr(x).map(Number);
 const P=new URLSearchParams(location.search);
 let DB=P.get("db")||"",ROOM=P.get("r")||"",ANIM=P.get("m")==="anim";
 const SID=localStorage.getItem("ql_sid")||(()=>{const s=Math.random().toString(36).slice(2,9);localStorage.setItem("ql_sid",s);return s})();
-let NAME=localStorage.getItem("ql_name")||"",room={qs:{},a:{}},last="",cur=0,ans={};
+let NAME=localStorage.getItem("ql_name")||"",room={qs:{},a:{}},last="",lastc="",ans={},ME={},T={},joined=0,nm=0,seen=0,copen=0;
 const LAB={qcm:"QCM",text:"Réponse libre",mix:"Mot mélangé"};
 
 /* ---------- Stockage : Firebase (REST) ou local (test) ---------- */
@@ -72,6 +79,7 @@ async function put(p,v){
 /* ---------- Outils ---------- */
 const qids=r=>Object.keys(r.qs||{}).filter(k=>r.qs[k]).sort();
 const scorable=q=>q.type==="qcm"?arr(q.ans).length>0:q.ans!==undefined;
+const answered=(q,x)=>!!x&&(q.type==="qcm"?nums(x.v).length>0:x.v!=null&&x.v!=="");
 function ok(q,v){
   if(v==null||!q)return false;
   if(q.type==="qcm"){const a=nums(q.ans).sort().join(),b=nums(v).sort().join();return a!==""&&a===b}
@@ -79,23 +87,29 @@ function ok(q,v){
 }
 const shuf=t=>{const a=t.toUpperCase().replace(/\s+/g," ").split("");let b=a;for(let i=0;i<9;i++){b=[...a].sort(()=>Math.random()-.5);if(b.join("")!==a.join(""))break}return b.map(c=>c===" "?"/":c).join(" ")};
 const qtext=q=>q.type==="mix"?`<p>Remets les lettres dans l’ordre :</p><div class="mix">${esc(q.mix)}</div>`:`<p class="big">${esc(q.text)}</p>`;
+const mh=(m,me)=>Object.keys(m||{}).sort().map(k=>`<div class="m ${m[k].f===me?"s":""}">${esc(m[k].x)}</div>`).join("");
 function board(r){
-  const L=Object.values(r.a||{}).map(u=>({n:u.n,k:qids(r).filter(id=>ok(r.qs[id],((u.r||{})[id]||{}).v)).length})).sort((a,b)=>b.k-a.k);
+  const L=Object.values(r.a||{}).filter(u=>u.n).map(u=>({n:u.n,k:qids(r).filter(id=>ok(r.qs[id],((u.r||{})[id]||{}).v)).length})).sort((a,b)=>b.k-a.k);
   return L.length?"<ol>"+L.map((x,i)=>`<li>${i?"":"🥇 "}${esc(x.n)} — <b>${x.k}</b> pt${x.k>1?"s":""}</li>`).join("")+"</ol>":"";
 }
 
-/* ---------- Accueil ---------- */
+/* ---------- Accueil & sessions ---------- */
+const sess=()=>JSON.parse(localStorage.getItem("ql_sess")||"[]");
 function home(){
+  const S=sess();
   $("#app").innerHTML=`<div class="c"><h3>🎤 Je suis l’animateur</h3>
   <p><small>Colle l’adresse de ta base Firebase (sans rien après .app ou .com). Laisse vide pour un simple test sur cet appareil.</small></p>
   <input id="fb" placeholder="https://mon-projet-default-rtdb.firebasedatabase.app" value="${esc(localStorage.getItem("ql_db")||"")}">
   <button onclick="mk()">✨ Créer une salle</button></div>
+  ${S.length?`<div class="c"><h3>📂 Mes sessions sauvegardées</h3>${S.map((s,i)=>`<div class="pill">Salle <b>${esc(s.r)}</b> · ${new Date(s.t).toLocaleString("fr-FR")} <button class="s sm" onclick="op(${i})">Ouvrir</button></div>`).join("")}</div>`:""}
   <div class="c"><h3>🎓 Je suis étudiant</h3><p>Ouvre simplement le lien envoyé par ton animateur.</p></div>`;
 }
+function op(i){const s=sess()[i],q=new URLSearchParams({r:s.r});if(s.db)q.set("db",s.db);q.set("m","anim");location.href=location.href.split("?")[0].split("#")[0]+"?"+q}
 async function mk(){
   DB=$("#fb").value.trim();localStorage.setItem("ql_db",DB);
   ROOM=Math.random().toString(36).slice(2,6).toUpperCase();ANIM=true;
   try{await put("/meta",{t:Date.now()});await put("/state","draft")}catch(e){return alert("Impossible de joindre la base. Vérifie l’adresse.")}
+  localStorage.setItem("ql_sess",JSON.stringify([{r:ROOM,db:DB,t:Date.now()},...sess()].slice(0,30)));
   const q=new URLSearchParams({r:ROOM});if(DB)q.set("db",DB);q.set("m","anim");
   history.replaceState(null,"","?"+q);start();
 }
@@ -106,7 +120,7 @@ const cp=()=>navigator.clipboard.writeText(link()).then(()=>alert("Lien copié �
 function start(){
   if(ANIM)teacher();
   else if(!NAME)nameForm();
-  else $("#app").innerHTML='<div class="c" id="live"></div>';
+  else studApp();
   refresh();setInterval(refresh,2000);
 }
 function nameForm(){
@@ -114,7 +128,12 @@ function nameForm(){
 }
 function setName(){
   const v=$("#nm").value.trim();if(!v)return;NAME=v;localStorage.setItem("ql_name",v);
-  $("#app").innerHTML='<div class="c" id="live"></div>';last="";refresh();
+  studApp();last="";refresh();
+}
+function studApp(){
+  $("#app").innerHTML=`<div id="live"></div><button class="fab" onclick="tgc()">💬<span id="bd"></span></button>
+  <div id="cp" class="cp" style="display:none"><b>💬 Discussion avec l’animateur</b><div id="msgs"></div>
+  <input id="cin" placeholder="Pose ta question…" onkeydown="if(event.key==='Enter')ssend()"><button onclick="ssend()">Envoyer</button></div>`;
 }
 async function refresh(){
   if(!ROOM||(!ANIM&&!NAME))return;
@@ -125,10 +144,14 @@ async function refresh(){
       room={qs:{},a:{},...r};
       const sg=JSON.stringify(room);
       if(sg!==last){last=sg;live(room)}
+      const cs=JSON.stringify(Object.entries(room.a).map(([s,u])=>[s,u.n,u.m]));
+      if(cs!==lastc){lastc=cs;tchat(room)}
     }else{
       const s=await get("/state");
       if(!s){$("#st").textContent="Salle introuvable…";return}
-      if(s!==last){last=s;const r=await get("");room={qs:{},a:{},...r};stud(room)}
+      if(!joined){joined=1;put("/a/"+SID+"/n",NAME)}
+      if(s!==last){last=s;room={qs:{},a:{},...(await get(""))};stud(room)}
+      syncMe(await get("/a/"+SID));
     }
     $("#st").textContent="Salle "+ROOM+" · connecté 🟢";
   }catch(e){$("#st").textContent="Connexion impossible 🔴"}
@@ -139,16 +162,16 @@ function teacher(){
   $("#app").innerHTML=`<div class="c"><span class="tag">Salle ${ROOM}</span>
   <p><b>Lien à envoyer aux étudiants :</b></p><input readonly value="${esc(link())}" onclick="this.select()">
   <button class="s" onclick="cp()">📋 Copier le lien</button>
-  ${DB?"":"<br><small>Mode test : fonctionne seulement entre onglets du même navigateur.</small>"}</div>
-  <div class="c" id="live"></div>
-  <div class="c"><h3>➕ Ajouter une question</h3>
-  <select id="t" onchange="tg()"><option value="qcm">🔘 QCM (cases à cocher)</option><option value="text">💬 Réponse libre / devinette</option><option value="mix">🔤 Mot mélangé (jeu de mots)</option></select>
+  <br><small>Garde le lien animateur de cette page en favori : il te permet de revenir voir la session quand tu veux.${DB?"":" Mode test : seulement entre onglets du même navigateur."}</small></div>
+  <div class="c" id="live"></div><div class="c" id="chat"></div>
+  <div class="c"><h3>➕ Ajouter au sujet</h3>
+  <select id="t" onchange="tg()"><option value="qcm">🔘 QCM (cases à cocher)</option><option value="text">💬 Réponse libre / devinette</option><option value="mix">🔤 Mot mélangé (jeu de mots)</option><option value="ex">📘 Titre d’exercice (ex. Exercice 2)</option></select>
   <textarea id="qt" rows="2" placeholder="Ta question…"></textarea>
   <div id="qm"><small>Écris les choix et coche la ou les bonnes réponses :</small><div id="rows"></div>
   <button class="s" onclick="addRow()">+ Ajouter un choix</button>
   <label class="chk"><input type="checkbox" id="jf" checked> Demander une justification à l’étudiant</label></div>
   <input id="qa" placeholder="Réponse attendue (plusieurs possibles : séparées par |) — facultatif">
-  <button onclick="addQ()">➕ Ajouter au questionnaire</button></div>`;
+  <button onclick="addQ()">➕ Ajouter</button></div>`;
   tg();for(let i=0;i<4;i++)addRow();
 }
 function addRow(){$("#rows").insertAdjacentHTML("beforeend",'<div class="row"><input type="checkbox" class="ck"><input class="ct" placeholder="Choix…"></div>')}
@@ -156,11 +179,11 @@ function tg(){
   const t=$("#t").value;
   $("#qm").style.display=t==="qcm"?"block":"none";
   $("#qa").style.display=t==="text"?"block":"none";
-  $("#qt").placeholder=t==="mix"?"Le mot ou la phrase à mélanger…":"Ta question…";
+  $("#qt").placeholder=t==="mix"?"Le mot ou la phrase à mélanger…":t==="ex"?"Titre ou énoncé de l’exercice…":"Ta question…";
 }
 async function addQ(){
-  if(room.state!=="draft")return alert("Le questionnaire est déjà lancé.");
-  const t=$("#t").value,txt=$("#qt").value.trim();if(!txt)return alert("Écris la question !");
+  if(room.state!=="draft")return alert("Clique d’abord sur « Modifier le sujet » pour ajouter des questions.");
+  const t=$("#t").value,txt=$("#qt").value.trim();if(!txt)return alert("Écris le texte !");
   const q={type:t,text:txt};
   if(t==="qcm"){
     const rows=[...document.querySelectorAll(".row")].map(r=>({c:r.querySelector(".ct").value.trim(),k:r.querySelector(".ck").checked})).filter(x=>x.c);
@@ -169,85 +192,115 @@ async function addQ(){
     if(!q.ans.length)return alert("Coche au moins une bonne réponse.");
     q.just=$("#jf").checked;
   }else if(t==="mix"){q.ans=txt;q.mix=shuf(txt)}
-  else{const a=$("#qa").value.trim();if(a)q.ans=a}
+  else if(t==="text"){const a=$("#qa").value.trim();if(a)q.ans=a}
   const n=Math.max(0,...qids(room).map(k=>+k.slice(1)))+1;
   await put("/qs/q"+String(n).padStart(2,"0"),q);
   $("#qt").value="";$("#qa").value="";$("#rows").innerHTML="";for(let i=0;i<4;i++)addRow();
   last="";refresh();
 }
-async function del(id){await put("/qs/"+id,null);last="";refresh()}
-async function launch(){if(!qids(room).length)return alert("Ajoute au moins une question.");await put("/state","open");last="";refresh()}
-async function rev(){const m=prompt("Message avec les corrections (facultatif) :");if(m)await put("/msg",m);await put("/state","revealed");last="";refresh()}
-async function endp(){if(confirm("Terminer le sondage ?")){await put("/state","ended");last="";refresh()}}
+const go=async(p,v)=>{await put(p,v);last="";refresh()};
+const del=id=>go("/qs/"+id,null);
+function launch(){if(!qids(room).length)return alert("Ajoute au moins une question.");go("/state","open")}
+async function rev(){const m=prompt("Message avec les corrections (facultatif) :");if(m)await put("/msg",m);go("/state","revealed")}
+function endp(){if(confirm("Clôturer le sondage ?"))go("/state","ended")}
+function expl(id){const t=prompt("Explication pour tous les étudiants :",room.qs[id].exp||"");if(t!==null)go("/qs/"+id+"/exp",t||null)}
+function rep(s,id){const t=prompt("Ta réponse à cet étudiant :",((room.a[s].fb||{})[id])||"");if(t!==null)go("/a/"+s+"/fb/"+id,t||null)}
 function stats(r,id,q){
-  const U=Object.values(r.a||{}).filter(u=>u.r&&u.r[id]),good=nums(q.ans);let h="";
+  const U=Object.entries(r.a||{}).filter(([s,u])=>u.n&&u.r&&u.r[id]),good=nums(q.ans);let h="";
   if(q.type==="qcm"){
     arr(q.choices).forEach((c,i)=>{
-      const k=U.filter(u=>nums(u.r[id].v).includes(i)).length,p=U.length?k/U.length*100:0,g=good.includes(i);
+      const k=U.filter(([s,u])=>nums(u.r[id].v).includes(i)).length,p=U.length?k/U.length*100:0,g=good.includes(i);
       h+=`<div class="bar"><i style="width:${p}%;${g?"background:var(--ok);opacity:.8":""}"></i><b>${g?"✅ ":""}${esc(c)} — ${k}</b></div>`;
     });
-    h+=U.filter(u=>u.r[id].j).map(u=>`<span class="pill">💬 ${esc(u.n)} : ${esc(u.r[id].j)}</span>`).join("");
+    h+=U.filter(([s,u])=>u.r[id].j).map(([s,u])=>`<div class="res">💬 <b>${esc(u.n)}</b> : ${esc(u.r[id].j)} <button class="s sm" onclick="rep('${s}','${id}')">↩️ Répondre</button>${(u.fb||{})[id]?`<br>👨‍🏫 ${esc(u.fb[id])}`:""}</div>`).join("");
   }else{
-    h+=U.map(u=>`<span class="pill">${esc(u.n)} : <b>${esc(u.r[id].v)}</b></span>`).join("");
+    h+=U.map(([s,u])=>`<span class="pill">${esc(u.n)} : <b>${esc(u.r[id].v)}</b></span>`).join("");
     if(q.ans!==undefined)h+=`<p>✅ ${esc(String(q.ans).split("|")[0])}</p>`;
   }
   return h;
 }
 function live(r){
-  const ids=qids(r),S=r.state,U=Object.values(r.a||{});
+  const ids=qids(r),S=r.state,Q=ids.filter(k=>r.qs[k].type!=="ex");let n=0;
   let h=`<span class="tag">${{draft:"✏️ Préparation",open:"🟢 En cours",revealed:"👁️ Correction affichée",ended:"🏁 Terminé"}[S]}</span>`;
-  if(S!=="draft")h+=`<p>👥 ${U.length} étudiant(s) · ✅ ${U.filter(u=>u.done).length} ont envoyé leurs réponses</p>`;
   if(!ids.length)h+="<p>Aucune question pour l’instant. Ajoute la première ⬇️</p>";
-  ids.forEach((id,i)=>{
-    const q=r.qs[id];
-    h+=`<div class="qb"><b>${i+1}. ${esc(q.type==="mix"?"Mot mélangé : "+q.mix:q.text)}</b> <span class="tag">${LAB[q.type]}</span>${S==="draft"?` <button class="r sm" onclick="del('${id}')">🗑️</button>`:""}${S==="draft"&&q.type==="qcm"?"<br>"+arr(q.choices).map((c,k)=>`<span class="pill">${nums(q.ans).includes(k)?"✅ ":""}${esc(c)}</span>`).join(""):stats(r,id,q)}</div>`;
+  ids.forEach(id=>{
+    const q=r.qs[id],dl=S==="draft"?` <button class="r sm" onclick="del('${id}')">🗑️</button>`:"";
+    if(q.type==="ex"){h+=`<div class="qb" style="background:#f4f2ff"><b>📘 ${esc(q.text)}</b>${dl}</div>`;return}
+    n++;
+    h+=`<div class="qb"><b>${n}. ${esc(q.type==="mix"?"Mot mélangé : "+q.mix:q.text)}</b> <span class="tag">${LAB[q.type]}</span>${dl}${S!=="draft"?` <button class="s sm" onclick="expl('${id}')">💡 Explication</button>`:""}`;
+    h+=S==="draft"?(q.type==="qcm"?"<br>"+arr(q.choices).map((c,k)=>`<span class="pill">${nums(q.ans).includes(k)?"✅ ":""}${esc(c)}</span>`).join(""):""):stats(r,id,q);
+    if(q.exp)h+=`<p>💡 ${esc(q.exp)}</p>`;
+    h+="</div>";
   });
-  if(S==="draft")h+=`<button class="g" onclick="launch()">🚀 Lancer le questionnaire</button>`;
-  if(S==="open")h+=`<button class="g" onclick="rev()">👁️ Révéler les corrections</button>`;
-  if(S==="open"||S==="revealed")h+=`<button class="r" onclick="endp()">🏁 Fin du sondage</button>`;
-  if(S==="ended")h+=`<h3>🏆 Classement</h3>${board(r)}<button class="s" onclick="location.href=location.href.split('?')[0]">🔄 Nouvelle salle</button>`;
+  if(S!=="draft"){
+    const rows=Object.entries(r.a||{}).filter(([s,u])=>u.n).sort((a,b)=>a[1].n.localeCompare(b[1].n)).map(([s,u])=>{
+      const miss=[];let pts=0,sc=0;
+      Q.forEach((k,i)=>{const q=r.qs[k],x=(u.r||{})[k];if(!answered(q,x))miss.push(i+1);if(scorable(q)){sc++;if(ok(q,(x||{}).v))pts++}});
+      return `<tr><td>${esc(u.n)}</td><td>${Q.length-miss.length}/${Q.length}</td><td>${sc?pts+"/"+sc:"–"}</td><td>${miss.join(", ")||"✅"}</td></tr>`;
+    });
+    h+=`<h3>👥 Étudiants (${rows.length})</h3><div style="overflow-x:auto"><table><tr><th>Nom</th><th>Répondu</th><th>Score</th><th>Manque</th></tr>${rows.join("")}</table></div>`;
+  }
+  if(S==="draft")h+=`<button class="g" onclick="launch()">🚀 Lancer le sujet</button>`;
+  if(S==="open")h+=`<button class="g" onclick="rev()">👁️ Révéler les corrections</button><button class="s" onclick="go('/state','draft')">✏️ Modifier le sujet</button>`;
+  if(S==="open"||S==="revealed")h+=`<button class="r" onclick="endp()">🏁 Clôturer</button>`;
+  if(S==="ended")h+=`<h3>🏆 Classement</h3>${board(r)}<button class="s" onclick="location.href=location.href.split('?')[0]">🔄 Accueil / nouvelle salle</button>`;
   $("#live").innerHTML=h;
 }
+function tchat(r){
+  const keep=[...document.querySelectorAll("#chat input")].map(i=>[i.id,i.value]),f=document.activeElement&&document.activeElement.id;
+  const th=Object.entries(r.a||{}).filter(([s,u])=>u.m);
+  $("#chat").innerHTML="<h3>💬 Messages des étudiants</h3>"+(th.length?th.map(([s,u])=>`<div class="qb"><b>${esc(u.n||"?")}</b>${mh(u.m,"t")}<input id="ci_${s}" placeholder="Répondre…" onkeydown="if(event.key==='Enter')tsend('${s}')"><button onclick="tsend('${s}')">Envoyer</button></div>`).join(""):"<small>Aucun message pour l’instant.</small>");
+  keep.forEach(([i,v])=>{const e=$("#"+i);if(e)e.value=v});
+  if(f&&$("#"+f))$("#"+f).focus();
+}
+async function tsend(s){const e=$("#ci_"+s),x=e.value.trim();if(!x)return;e.value="";await put("/a/"+s+"/m/t"+Date.now(),{f:"t",x});lastc="";refresh()}
 
 /* ---------- Étudiant ---------- */
+const tcount=()=>Object.values(ME.m||{}).filter(m=>m.f==="t").length;
+function tgc(){copen=!copen;$("#cp").style.display=copen?"block":"none";if(copen){seen=tcount();$("#bd").textContent="";$("#msgs").scrollTop=1e6}}
+async function ssend(){const e=$("#cin"),x=e.value.trim();if(!x)return;e.value="";await put("/a/"+SID+"/m/t"+Date.now(),{f:"s",x});syncMe(await get("/a/"+SID))}
+function fbSync(){Object.entries(ME.fb||{}).forEach(([id,t])=>{const e=$("#fb_"+id);if(e)e.innerHTML=`<div class="res nt">👨‍🏫 ${esc(t)}</div>`})}
+function syncMe(me){
+  ME=me||{};fbSync();
+  const k=Object.keys(ME.m||{}).length;
+  if(k!==nm){nm=k;$("#msgs").innerHTML=mh(ME.m,"s");$("#msgs").scrollTop=1e6}
+  $("#bd").textContent=!copen&&tcount()>seen?"🔴":"";
+}
 function stud(r){
-  const S=r.state,ids=qids(r),me=(r.a||{})[SID];
-  if(S==="draft"||!ids.length){$("#live").innerHTML="<h3>⏳ L’animateur prépare le questionnaire…</h3><p><small>Ne ferme pas cette page, elle se met à jour toute seule.</small></p>";return}
-  if(S==="open"){
-    if(me&&me.done){$("#live").innerHTML="<h3>✅ Réponses envoyées !</h3><p>Attends la correction de l’animateur…</p>";return}
-    ans={...(me&&me.r||{}),...ans};showQ();
-  }else result(r);
+  ME=(r.a||{})[SID]||{};
+  if(r.state==="draft"||!qids(r).length){$("#live").innerHTML='<div class="c"><h3>⏳ L’animateur prépare le sujet…</h3><p><small>Ne ferme pas cette page, elle se met à jour toute seule.</small></p></div>';return}
+  if(r.state==="open"){ans={...(ME.r||{}),...ans};sheet(r)}else result(r);
 }
-function showQ(){
-  const ids=qids(room),id=ids[cur],q=room.qs[id],a=ans[id]||{},sel=nums(a.v),lastQ=cur===ids.length-1;
-  let h=`<span class="tag">Question ${cur+1} / ${ids.length}</span><div class="bar"><i style="width:${(cur+1)/ids.length*100}%"></i></div>${qtext(q)}`;
-  if(q.type==="qcm"){
-    h+="<small>Coche une ou plusieurs réponses.</small>"+arr(q.choices).map((c,i)=>`<label class="chk"><input type="checkbox" value="${i}" ${sel.includes(i)?"checked":""} onchange="save()"> ${esc(c)}</label>`).join("");
-    if(q.just)h+=`<textarea id="jt" rows="3" placeholder="Justifie ton choix…" oninput="save()">${esc(a.j||"")}</textarea>`;
-  }else h+=`<input id="ans" value="${esc(a.v||"")}" oninput="save()" placeholder="Ta réponse…" autocomplete="off">`;
-  h+=`<br>${cur?'<button class="s" onclick="go(-1)">← Précédent</button>':""}<button onclick="go(1)">${lastQ?"✅ Envoyer mes réponses":"Suivant →"}</button>`;
-  $("#live").innerHTML=h;
+function sheet(r){
+  let n=0,h=`<div class="c"><h3>📝 Sujet</h3><small id="sv">Réponds dans l’ordre que tu veux. Tout est enregistré automatiquement.</small></div>`;
+  qids(r).forEach(id=>{
+    const q=r.qs[id];
+    if(q.type==="ex"){h+=`<div class="c ex"><h3>📘 ${esc(q.text)}</h3></div>`;return}
+    n++;const a=ans[id]||{},sel=nums(a.v);
+    h+=`<div class="c" id="Q_${id}"><span class="tag">Question ${n}</span>${qtext(q)}`;
+    if(q.type==="qcm"){
+      h+="<small>Coche une ou plusieurs réponses.</small>"+arr(q.choices).map((c,i)=>`<label class="chk"><input type="checkbox" value="${i}" ${sel.includes(i)?"checked":""} onchange="sv('${id}')"> ${esc(c)}</label>`).join("");
+      if(q.just)h+=`<textarea rows="3" placeholder="Justifie ton choix…" oninput="sv('${id}')">${esc(a.j||"")}</textarea>`;
+    }else h+=`<input value="${esc(a.v||"")}" placeholder="Ta réponse…" autocomplete="off" oninput="sv('${id}')">`;
+    h+=`<div id="fb_${id}"></div></div>`;
+  });
+  $("#live").innerHTML=h;fbSync();
 }
-function save(){
-  const id=qids(room)[cur],q=room.qs[id];
-  ans[id]=q.type==="qcm"?{v:[...document.querySelectorAll("input[type=checkbox]:checked")].map(x=>+x.value),j:$("#jt")?$("#jt").value:""}:{v:$("#ans").value.trim()};
-}
-async function go(d){
-  save();const ids=qids(room),id=ids[cur];
-  put("/a/"+SID+"/n",NAME);put("/a/"+SID+"/r/"+id,ans[id]);
-  if(d>0&&cur===ids.length-1){
-    const miss=ids.filter(k=>{const a=ans[k];return !a||a.v==null||a.v===""||(Array.isArray(a.v)&&!a.v.length)});
-    if(miss.length&&!confirm("Il te reste "+miss.length+" question(s) sans réponse. Envoyer quand même ?"))return;
-    await put("/a/"+SID,{n:NAME,r:ans,done:true});last="";return refresh();
-  }
-  cur=Math.max(0,Math.min(ids.length-1,cur+d));showQ();
+const sav=t=>{const e=$("#sv");if(e)e.textContent=t};
+function sv(id){
+  const q=room.qs[id],c=$("#Q_"+id);
+  ans[id]=q.type==="qcm"?{v:[...c.querySelectorAll("input[type=checkbox]:checked")].map(x=>+x.value),j:(c.querySelector("textarea")||{}).value||""}:{v:c.querySelector("input").value.trim()};
+  sav("⏳ Enregistrement…");clearTimeout(T[id]);
+  T[id]=setTimeout(async()=>{await put("/a/"+SID+"/r/"+id,ans[id]);sav("✅ Enregistré")},600);
 }
 function result(r){
-  const ids=qids(r),me=(r.a||{})[SID]||{},end=r.state==="ended";let pts=0,tot=0,h="";
-  ids.forEach((id,i)=>{
-    const q=r.qs[id],x=(me.r||{})[id]||{},sc=scorable(q),good=sc&&ok(q,x.v);
+  let n=0,pts=0,tot=0,h="";const end=r.state==="ended";
+  qids(r).forEach(id=>{
+    const q=r.qs[id];
+    if(q.type==="ex"){h+=`<div class="c ex"><h3>📘 ${esc(q.text)}</h3></div>`;return}
+    n++;const x=(ME.r||{})[id]||{},sc=scorable(q),good=sc&&ok(q,x.v);
     if(sc){tot++;if(good)pts++}
-    h+=`<div class="qb"><b>${i+1}. ${esc(q.type==="mix"?"Mot mélangé : "+q.mix:q.text)}</b>`;
+    h+=`<div class="c"><span class="tag">Question ${n}</span>${qtext(q)}`;
     if(q.type==="qcm"){
       h+=arr(q.choices).map((c,k)=>{const m=nums(x.v).includes(k),g=nums(q.ans).includes(k);return `<div class="res ${g?"ok":m?"ko":""}">${m?"👉 ":""}${g?"✅ ":""}${esc(c)}</div>`}).join("");
       if(x.j)h+=`<small>Ta justification : ${esc(x.j)}</small>`;
@@ -256,9 +309,10 @@ function result(r){
       if(q.ans!==undefined)h+=`<div class="res ok">✅ ${esc(String(q.ans).split("|")[0])}</div>`;
     }
     if(sc)h+=`<p>${good?"🎉 Bravo !":"❌ Pas tout à fait"}</p>`;
-    h+="</div>";
+    h+=`<div id="fb_${id}"></div>${q.exp?`<div class="res nt">💡 ${esc(q.exp)}</div>`:""}</div>`;
   });
-  $("#live").innerHTML=(end?`<h3>🏁 Sondage terminé, merci ${esc(NAME)} !</h3>`:"<h3>👁️ Correction</h3>")+(tot?`<p class="big">Ton score : ${pts} / ${tot} 🎯</p>`:"")+(r.msg?`<div class="res nt">💬 ${esc(r.msg)}</div>`:"")+h+(end?"<h3>🏆 Classement</h3>"+board(r):"");
+  $("#live").innerHTML=`<div class="c"><h3>${end?"🏁 Sondage terminé, merci "+esc(NAME)+" !":"👁️ Correction"}</h3>${tot?`<p class="big">Ton score : ${pts} / ${tot} 🎯</p>`:""}${r.msg?`<div class="res nt">💬 ${esc(r.msg)}</div>`:""}</div>`+h+(end?`<div class="c"><h3>🏆 Classement</h3>${board(r)}</div>`:"");
+  fbSync();
 }
 
 if(ROOM)start();else home();
